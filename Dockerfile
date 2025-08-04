@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # hadolint global ignore=DL3041,DL3040
 
-FROM fedora:42@sha256:ee88ab8a5c8bf78687ddcecadf824767e845adc19d8cdedb56f48521eb162b43
+FROM fedora:42@sha256:ee88ab8a5c8bf78687ddcecadf824767e845adc19d8cdedb56f48521eb162b43 AS tsffs-base
 
 # Download links can be obtained from:
 # https://lemcenter.intel.com/productDownload/?Product=256660e5-a404-4390-b436-f64324d94959
-ENV PUBLIC_SIMICS_PKGS_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/ead79ef5-28b5-48c7-8d1f-3cde7760798f/simics-6-packages-2024-05-linux64.ispm"
-ENV PUBLIC_SIMICS_ISPM_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/ead79ef5-28b5-48c7-8d1f-3cde7760798f/intel-simics-package-manager-1.8.3-linux64.tar.gz"
-ENV PUBLIC_SIMICS_PACKAGE_VERSION_1000="6.0.185"
+ARG PUBLIC_SIMICS_PKGS_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/ead79ef5-28b5-48c7-8d1f-3cde7760798f/simics-6-packages-2024-05-linux64.ispm"
+ARG PUBLIC_SIMICS_ISPM_URL="https://registrationcenter-download.intel.com/akdlm/IRC_NAS/ead79ef5-28b5-48c7-8d1f-3cde7760798f/intel-simics-package-manager-1.8.3-linux64.tar.gz"
+ARG PUBLIC_SIMICS_PACKAGE_VERSION_1000="6.0.185"
 ENV SIMICS_BASE="/workspace/simics/simics-${PUBLIC_SIMICS_PACKAGE_VERSION_1000}/"
 # Add cargo and ispm to the path
 ENV PATH="/root/.cargo/bin:/workspace/simics/ispm:${PATH}"
@@ -124,3 +124,49 @@ RUN ispm projects /workspace/projects/example/ --create \
     ninja
 
 RUN echo 'echo "To run the demo, run ./simics -no-gui --no-win fuzz.simics"' >> /root/.bashrc
+
+FROM tsffs-base AS tsffs-dev
+ARG USER_UID=1000
+ARG USERNAME=vscode
+
+# To build and run the dev image:
+#   docker build --build-arg USER_UID=$(id -u) --target tsffs-dev -t tsffs:dev .
+#   docker run --rm -ti -v .:/workspace/tsffs tsffs:dev
+
+# hadolint ignore=DL3004,SC3009
+RUN <<EOF
+set -e
+# create group for developers
+groupadd dev
+# Create group and user with a home at /home/vscode
+useradd \
+      --create-home    \
+      --uid $USER_UID \
+      --user-group     \
+      --groups dev \
+      --shell /bin/bash \
+      $USERNAME        \
+ && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
+
+# set /workspace/simics permissions to root:dev
+chown -R root:dev /workspace/{simics,projects} && chmod -R g+w /workspace/{simics,projects}
+
+# install Rust nightly for the user
+sudo -E -u $USERNAME bash -c 'curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain none'
+
+# copy Simics ISPM config
+mkdir -p /home/$USERNAME/.config
+cp -r "/root/.config/Intel Simics Package Manager/" "/home/$USERNAME/.config/"
+chown -R $USERNAME:$USERNAME "/home/$USERNAME/.config/"
+EOF
+
+WORKDIR /workspace/tsffs
+
+FROM fedora:42@sha256:ee88ab8a5c8bf78687ddcecadf824767e845adc19d8cdedb56f48521eb162b43 AS tsffs-prod
+
+COPY --from=tsffs-base /workspace/projects /workspace/projects
+COPY --from=tsffs-base /workspace/simics /workspace/simics
+COPY --from=tsffs-base /root/.bashrc /root/.bashrc
+COPY --from=tsffs-base /root/.cargo /root/.cargo
+
+WORKDIR /workspace/projects/example
