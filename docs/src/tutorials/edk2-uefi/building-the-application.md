@@ -38,7 +38,10 @@ This Dockerfile will obtain the EDK2 source and compile the BaseTools, then copy
 
 We will want to get our built UEFI application from the container, which we can
 do using the `docker cp` command. There are a few files we want to copy, so we'll
-use this script `build.sh` to automate the process:
+use this script `build.sh` to automate the process.
+
+It will also copy the `tsffs.h` header into the harness sources, copy the minimal boot disk
+and create a initial fuzzing corpus to prepare the project.
 
 ```sh
 #!/bin/bash
@@ -49,26 +52,36 @@ CONTAINER_UID=$(echo "${RANDOM}" | sha256sum | head -c 8)
 CONTAINER_NAME="${IMAGE_NAME}-tmp-${CONTAINER_UID}"
 
 mkdir -p "${SCRIPT_DIR}/project/"
+# copy minimal boot disk
+cp "${SCRIPT_DIR}/../../rsrc/minimal_boot_disk.craff" "${SCRIPT_DIR}/project/"
+
+# copy tsffs.h header into src
+cp "${SCRIPT_DIR}/../../../harness/tsffs.h" "${SCRIPT_DIR}/src/"
 docker build -t "${IMAGE_NAME}" -f "Dockerfile" "${SCRIPT_DIR}"
 docker create --name "${CONTAINER_NAME}" "${IMAGE_NAME}"
-docker cp \
-    "${CONTAINER_NAME}:/edk2/Tutorial/Build/CryptoPkg/All/DEBUG_GCC/X64/Tutorial/Tutorial/DEBUG/Tutorial.efi" \
-    "${SCRIPT_DIR}/project/Tutorial.efi"
-docker cp \
-    "${CONTAINER_NAME}:/edk2/Tutorial/Build/CryptoPkg/All/DEBUG_GCC/X64/Tutorial/Tutorial/DEBUG/Tutorial.map" \
-    "${SCRIPT_DIR}/project/Tutorial.map"
-docker cp \
-    "${CONTAINER_NAME}:/edk2/Tutorial/Build/CryptoPkg/All/DEBUG_GCC/X64/Tutorial/Tutorial/DEBUG/Tutorial.debug" \
-    "${SCRIPT_DIR}/project/Tutorial.debug"
+
+for file_ext in efi map debug; do
+    docker cp \
+        "${CONTAINER_NAME}:/edk2/Tutorial/Build/CryptoPkg/All/DEBUG_GCC/X64/Tutorial/Tutorial/DEBUG/Tutorial.efi" \
+        "${SCRIPT_DIR}/project/Tutorial.${file_ext}"
+done
+
 docker rm -f "${CONTAINER_NAME}"
+
+# ensure corpus
+if [ ! -d "${SCRIPT_DIR}/corpus" ]; then
+    mkdir "${SCRIPT_DIR}/corpus"
+    curl -L -o "${SCRIPT_DIR}/corpus/0" https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/0
+    curl -L -o "${SCRIPT_DIR}/corpus/1" https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/1
+    curl -L -o "${SCRIPT_DIR}/corpus/2" https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/2
+    curl -L -o "${SCRIPT_DIR}/corpus/3" https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/3
+fi
 ```
 
 The script will build the image, create a container using it, copy the relevant files
 to our host machine (in a `project` directory), then delete the container.
 
-Mark the script executable and then we'll go ahead and run it with:
-
+Let's go ahead and run it:
 ```sh
-chmod +x build.sh
 ./build.sh
 ```

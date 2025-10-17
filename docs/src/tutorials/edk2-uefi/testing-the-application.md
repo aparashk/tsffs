@@ -18,13 +18,13 @@ You should see (at least, but likely more packages):
 ```txt
 Installed Base Packages
  Package Number  Name         Version  Installed Paths
- 1000            Simics-Base  6.0.169  /home/rhart/simics/simics-6.0.169
+ 1000            Simics-Base  6.0.185  /home/rhart/simics/simics-6.0.185
 
 Installed Addon Packages
  Package Number  Name             Version    Installed Paths
- 2096            QSP-x86          6.0.70     /home/rhart/simics/simics-qsp-x86-6.0.70
- 8112            QSP-CPU          6.0.17     /home/rhart/simics/simics-qsp-cpu-6.0.17
- 31337           TSFFS            6.0.1      /home/rhart/simics/simics-tsffs-6.0.1
+ 2096            QSP-x86          6.0.73     /home/rhart/simics/simics-qsp-x86-6.0.73
+ 8112            QSP-CPU          6.0.21     /home/rhart/simics/simics-qsp-cpu-6.0.21
+ 31337           TSFFS            6.1.6      /home/rhart/simics/simics-tsffs-6.1.6
 ```
 
 in the list!
@@ -35,17 +35,19 @@ The build script for our application created a `project` directory for us if it 
 exist, so we'll instantiate that directory as our project with `ispm`:
 
 ```sh
-ispm projects project --create 1000-6.0.185 2096-6.0.70 8112-6.0.17 31337-latest \
+ispm projects project --create 1000-6.0.185 2096-6.0.73 8112-6.0.21 31337-latest \
   --ignore-existing-files
 cd project
 ```
 
-## Get the Minimal Boot Disk
+## Minimal Boot Disk
 
 The TSFFS repository provides a boot disk called `minimal_boot_disk.craff` which
 provides a filesystem and the *Simics Agent* to allow us to easily download our UEFI
-application to the filesystem so we can run it. Copy the file
-`examples/rsrc/minimal_boot_disk.craff` into your `project` directory.
+application to the filesystem so we can run it.
+
+Note: this boot disk has already been copied by `build.sh` into the `project` directory
+in the previous step.
 
 ## Create a Script
 
@@ -53,7 +55,7 @@ Our initial script will load (but not use *yet*) the TSFFS module, then configur
 start our simple x86-64 platform and run our UEFI application. In the `project`
 directory, create `run.simics`:
 
-```simics
+```python
 # Load the TSFFS module (to make sure we can load it)
 load-module tsffs
 

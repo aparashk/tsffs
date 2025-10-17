@@ -75,17 +75,14 @@ Re-compile the application by running the build script.
 
 ## Obtain a Corpus
 
-The fuzzer will take input from the `corpus` directory in the project directory, so
-we'll create that directory and add some sample certificate files in DER format as
-our input corpus.
+The fuzzer will take input from the `corpus` directory located under `edk2-uefi`:
 
-```sh
-mkdir corpus
-curl -L -o corpus/0 https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/0
-curl -L -o corpus/1 https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/1
-curl -L -o corpus/2 https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/2
-curl -L -o corpus/3 https://github.com/dvyukov/go-fuzz-corpus/raw/master/x509/certificate/corpus/3
+```python
+@tsffs.corpus_directory = SIM_lookup_file("%simics%/../corpus")
 ```
+
+In `build.sh` we have already created that directory and added some sample
+certificate files in DER format as our input corpus.
 
 ## Configuring the Fuzzer
 
@@ -95,14 +92,14 @@ script, we'll add each of the following lines.
 
 First, we need to create an actual `tsffs` object to instantiate the fuzzer.
 
-```simics
+```python
 load-module tsffs # You should already have this
 init-tsffs
 ```
 
 Next, we'll set the log level to maximum for demonstration purposes:
 
-```simics
+```python
 tsffs.log-level 4
 ```
 
@@ -111,7 +108,7 @@ into our UEFI application. This is the default, so these calls can be skipped in
 usage unless you want to change the defaults, they are just provided here for
 completeness.
 
-```simics
+```python
 @tsffs.start_on_harness = True
 @tsffs.stop_on_harness = True
 ```
@@ -121,24 +118,28 @@ fuzz for. In our case, these are timeouts (we'll set the timeout to 3 seconds) t
 hangs, and CPU exceptions. we'll enable exceptions 13 for general protection fault and
 14 for page faults to detect out of bounds reads and writes.
 
-```simics
+```python
 @tsffs.timeout = 3.0
 @tsffs.exceptions = [13, 14]
 ```
 
-We'll tell the fuzzer where to take its corpus and save its solutions. The fuzzer will
-take its corpus from the `corpus` directory and save solutions to the `solutions`
-directory in the project by default, so this call can be skipped in real usage unless
-you want to change the defaults.
+By default, TSFFS expects the `corpus` and `solutions` directories to be located within
+the Simics project directory.
 
-```simics
-@tsffs.corpus_directory = SIM_lookup_file("%simics%/corpus")
+However, Since our fuzzer is configured to read its corpus from the `../corpus`
+directory (relative to the `project` directory), we must explicitly specify the
+correct path using the following configuration:
+
+```python
+# project/../corpus
+@tsffs.corpus_directory = SIM_lookup_file("%simics%/../corpus")
+# set solutions directory (default location, explicitly defined for clarity)
 @tsffs.solutions_directory = SIM_lookup_file("%simics%/solutions")
 ```
 
 We'll also *delete* the following code from the `run.simics` script:
 
-```simics
+```python
 script-branch {
   bp.time.wait-for seconds = 30
   quit 0
