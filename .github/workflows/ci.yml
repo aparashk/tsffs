@@ -399,6 +399,53 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Aggressive cleanup
+        run: |
+          # Remove Java (JDKs)
+          sudo rm -rf /usr/lib/jvm
+
+          # Remove .NET SDKs
+          sudo rm -rf /usr/share/dotnet
+
+          # Remove Swift toolchain
+          sudo rm -rf /usr/share/swift
+
+          # Remove Haskell (GHC)
+          sudo rm -rf /usr/local/.ghcup
+
+          # Rustup
+          sudo rm -rf /home/runner/.rustup
+
+          # Remove Julia
+          sudo rm -rf /usr/local/julia*
+
+          # Remove Android SDKs
+          sudo rm -rf /usr/local/lib/android
+
+          # Remove Chromium (optional if not using for browser tests)
+          sudo rm -rf /usr/local/share/chromium
+
+          # Google Cloud SDK
+          sudo rm -rf /usr/lib/google-cloud-sdk
+
+          # Remove Microsoft/Edge and Google Chrome builds
+          sudo rm -rf /opt/microsoft /opt/google
+
+          # Remove Azure CLI
+          sudo rm -rf /opt/az
+
+          # Remove PowerShell
+          sudo rm -rf /usr/local/share/powershell
+
+          # Remove tool cache (not needed, Rust installed via dtolnay action)
+          sudo rm -rf /opt/hostedtoolcache
+
+          # Remove GHC binaries
+          sudo rm -rf /opt/ghc
+
+          # Remove Homebrew for Linux
+          sudo rm -rf /home/linuxbrew
+
       - name: Add ISPM to PATH
         run: |
           echo "${HOME}/simics/ispm/" >> "${GITHUB_PATH}"
@@ -413,6 +460,8 @@ jobs:
             glibc-static.i686 gtk3 jq lld lld-devel lld-libs llvm llvm-libs \
             llvm-static make mesa-libgbm mtools ninja-build openssl \
             openssl-devel openssl-libs python3 python3-pip yamllint
+          dnf clean all
+          rm -rf /var/cache/dnf
 
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -489,6 +538,7 @@ jobs:
               "${{ env.PUBLIC_SIMICS_PKGS_URL }}" && \
           tar -C "${HOME}/simics/ispm" --strip-components=1 \
               -xvf "${HOME}/simics/ispm.tar.gz"
+          rm -f "${HOME}/simics/ispm.tar.gz"
 
       - name: Set up SIMICS Install Directory
         run: |
@@ -499,6 +549,7 @@ jobs:
         run: |
           ispm packages --install-bundle "${HOME}/simics/simics.ispm" \
               --non-interactive --trust-insecure-packages
+          rm "${HOME}/simics/simics.ispm"
 
       - name: Install SIMICS Build
         run: |
@@ -507,6 +558,11 @@ jobs:
       - name: Build TSFFS Package
         run: |
           cargo simics-build -r
+          cargo clean
+        env:
+          CARGO_INCREMENTAL: 0 # Disable incremental compilation to save disk space
+          RUSTFLAGS: "-C debuginfo=0" # Disable debug info to reduces intermediate file sizes
+          CARGO_PROFILE_RELEASE_DEBUG: 0
 
       - name: CT39 - Clippy Check Project
         run: |
@@ -529,6 +585,10 @@ jobs:
         run: |
           SIMICS_TEST_CLEANUP_EACH=1 SIMICS_TEST_LOCAL_PACKAGES_ONLY=1 cargo test --no-fail-fast -r _latest || ( echo "❗ Tests failed" && exit 1 )
           echo "✅ Tests passed"
+        env:
+          CARGO_INCREMENTAL: 0 # Disable incremental compilation to save disk space
+          RUSTFLAGS: "-C debuginfo=0" # Disable debug info to reduces intermediate file sizes
+          CARGO_PROFILE_TEST_DEBUG: 0
 
       - name: Build Docs
         run: |
@@ -618,10 +678,11 @@ jobs:
         with:
           lfs: true
 
+      # enforce the gnu target here, since cargo-simics-build isn't compatible with x86_64-pc-windows-msvc
       - name: Setup, Build, and Install TSFFS
         run: |
           cargo install cargo-simics-build
-          cargo simics-build -r
+          cargo simics-build -r --target x86_64-pc-windows-gnu
 
       - name: Upload Distribution Package
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -685,7 +746,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Extract Rust channel from rust-toolchain.toml
         id: rust-channel
@@ -726,6 +787,38 @@ jobs:
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
         with:
           egress-policy: audit
+
+      - name: Aggressive cleanup
+        run: |
+          # Remove Java (JDKs)
+          sudo rm -rf /usr/lib/jvm
+
+          # Remove .NET SDKs
+          sudo rm -rf /usr/share/dotnet
+
+          # Remove Swift toolchain
+          sudo rm -rf /usr/share/swift
+
+          # Remove Haskell (GHC)
+          sudo rm -rf /usr/local/.ghcup
+
+          # Remove Julia
+          sudo rm -rf /usr/local/julia*
+
+          # Remove Android SDKs
+          sudo rm -rf /usr/local/lib/android
+
+          # Remove Chromium (optional if not using for browser tests)
+          sudo rm -rf /usr/local/share/chromium
+
+          # Remove Microsoft/Edge and Google Chrome builds
+          sudo rm -rf /opt/microsoft /opt/google
+
+          # Remove Azure CLI
+          sudo rm -rf /opt/az
+
+          # Remove PowerShell
+          sudo rm -rf /usr/local/share/powershell
 
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
