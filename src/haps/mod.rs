@@ -22,6 +22,17 @@ use simics::{
     debug, get_processor_number, info, trace, warn,
 };
 
+enum IterationControl {
+    Continue,
+    StopRequested,
+}
+
+enum IterationCount {
+    NoCount,
+    Timeout,
+    Solution,
+}
+
 impl Tsffs {
     fn on_simulation_stopped_magic_start(&mut self, magic_number: MagicNumber) -> Result<()> {
         if !self.have_initial_snapshot() {
@@ -91,6 +102,80 @@ impl Tsffs {
         self.on_simulation_stopped_solution(SolutionKind::Manual)
     }
 
+    fn finish_iteration(
+        &mut self,
+        exit_kind: ExitKind,
+        iteration_count: IterationCount,
+        missing_start_info_message: &str,
+    ) -> Result<IterationControl> {
+        // 1) Count this iteration as complete.
+        self.iterations += 1;
+
+        // 2) Enforce iteration cap before scheduling/resuming work for next iteration.
+        if self.iteration_limit != 0 && self.iterations >= self.iteration_limit {
+            let duration = SystemTime::now().duration_since(
+                *self
+                    .start_time
+                    .get()
+                    .ok_or_else(|| anyhow!("Start time was not set"))?,
+            )?;
+
+            // Set the log level so this message always prints
+            set_log_level(self.as_conf_object_mut(), LogLevel::Info)?;
+
+            info!(
+                self.as_conf_object(),
+                "Configured iteration count {} reached. Stopping after {} seconds ({} exec/s).",
+                self.iterations,
+                duration.as_secs_f32(),
+                self.iterations as f32 / duration.as_secs_f32()
+            );
+
+            self.send_shutdown()?;
+
+            if self.quit_on_iteration_limit {
+                quit(0)?;
+            } else {
+                return Ok(IterationControl::StopRequested);
+            }
+        }
+
+        // 3) Update outcome counters where this stop reason contributes to stats.
+        match iteration_count {
+            IterationCount::NoCount => {}
+            IterationCount::Timeout => self.timeouts += 1,
+            IterationCount::Solution => self.solutions += 1,
+        }
+
+        let fuzzer_tx = self
+            .fuzzer_tx
+            .get()
+            .ok_or_else(|| anyhow!("No fuzzer tx channel"))?;
+
+        // 4) Publish this iteration result back to the fuzzer loop.
+        fuzzer_tx.send(exit_kind)?;
+
+        // 5) Restore to initial snapshot according to the configured restore interval.
+        if self.should_restore_snapshot_this_iteration() {
+            self.restore_initial_snapshot()?;
+        }
+
+        // 6) Reset AFL edge chaining state for the next execution.
+        self.coverage_prev_loc = 0;
+
+        // 7) Persist testcase bytes when start metadata is available.
+        if self.start_info.get().is_some() {
+            self.get_and_write_testcase()?;
+        } else {
+            debug!(self.as_conf_object(), "{missing_start_info_message}");
+        }
+
+        // 8) Arm timeout for the next iteration run.
+        self.post_timeout_event()?;
+
+        Ok(IterationControl::Continue)
+    }
+
     fn on_simulation_stopped_magic_stop(&mut self) -> Result<()> {
         if !self.have_initial_snapshot() {
             warn!(
@@ -117,56 +202,14 @@ impl Tsffs {
                 return Ok(());
             }
 
-            self.iterations += 1;
-
-            if self.iteration_limit != 0 && self.iterations >= self.iteration_limit {
-                let duration = SystemTime::now().duration_since(
-                    *self
-                        .start_time
-                        .get()
-                        .ok_or_else(|| anyhow!("Start time was not set"))?,
-                )?;
-
-                // Set the log level so this message always prints
-                set_log_level(self.as_conf_object_mut(), LogLevel::Info)?;
-
-                info!(
-                    self.as_conf_object(),
-                    "Configured iteration count {} reached. Stopping after {} seconds ({} exec/s).",
-                    self.iterations,
-                    duration.as_secs_f32(),
-                    self.iterations as f32 / duration.as_secs_f32()
-                );
-
-                self.send_shutdown()?;
-
-                if self.quit_on_iteration_limit {
-                    quit(0)?;
-                } else {
-                    return Ok(());
-                }
+            // Normal stop path: report successful completion without solution/timeout counters.
+            if let IterationControl::StopRequested = self.finish_iteration(
+                ExitKind::Ok,
+                IterationCount::NoCount,
+                "Missing start buffer or size, not writing testcase.",
+            )? {
+                return Ok(());
             }
-
-            let fuzzer_tx = self
-                .fuzzer_tx
-                .get()
-                .ok_or_else(|| anyhow!("No fuzzer tx channel"))?;
-
-            fuzzer_tx.send(ExitKind::Ok)?;
-
-            self.restore_initial_snapshot()?;
-            self.coverage_prev_loc = 0;
-
-            if self.start_info.get().is_some() {
-                self.get_and_write_testcase()?;
-            } else {
-                debug!(
-                    self.as_conf_object(),
-                    "Missing start buffer or size, not writing testcase."
-                );
-            }
-
-            self.post_timeout_event()?;
         }
 
         if self.save_all_execution_traces {
@@ -328,56 +371,14 @@ impl Tsffs {
                 return Ok(());
             }
 
-            self.iterations += 1;
-
-            if self.iteration_limit != 0 && self.iterations >= self.iteration_limit {
-                let duration = SystemTime::now().duration_since(
-                    *self
-                        .start_time
-                        .get()
-                        .ok_or_else(|| anyhow!("Start time was not set"))?,
-                )?;
-
-                // Set the log level so this message always prints
-                set_log_level(self.as_conf_object_mut(), LogLevel::Info)?;
-
-                info!(
-                    self.as_conf_object(),
-                    "Configured iteration count {} reached. Stopping after {} seconds ({} exec/s).",
-                    self.iterations,
-                    duration.as_secs_f32(),
-                    self.iterations as f32 / duration.as_secs_f32()
-                );
-
-                self.send_shutdown()?;
-
-                if self.quit_on_iteration_limit {
-                    quit(0)?;
-                } else {
-                    return Ok(());
-                }
+            // Manual stop behaves like normal completion for accounting purposes.
+            if let IterationControl::StopRequested = self.finish_iteration(
+                ExitKind::Ok,
+                IterationCount::NoCount,
+                "Missing start buffer or size, not writing testcase. This may be due to using manual no-buffer harnessing.",
+            )? {
+                return Ok(());
             }
-
-            let fuzzer_tx = self
-                .fuzzer_tx
-                .get()
-                .ok_or_else(|| anyhow!("No fuzzer tx channel"))?;
-
-            fuzzer_tx.send(ExitKind::Ok)?;
-
-            self.restore_initial_snapshot()?;
-            self.coverage_prev_loc = 0;
-
-            if self.start_info.get().is_some() {
-                self.get_and_write_testcase()?;
-            } else {
-                debug!(
-                    self.as_conf_object(),
-                    "Missing start buffer or size, not writing testcase. This may be due to using manual no-buffer harnessing."
-                );
-            }
-
-            self.post_timeout_event()?;
         }
 
         if self.save_all_execution_traces {
@@ -424,65 +425,21 @@ impl Tsffs {
                 return Ok(());
             }
 
-            self.iterations += 1;
-
-            if self.iteration_limit != 0 && self.iterations >= self.iteration_limit {
-                let duration = SystemTime::now().duration_since(
-                    *self
-                        .start_time
-                        .get()
-                        .ok_or_else(|| anyhow!("Start time was not set"))?,
-                )?;
-
-                // Set the log level so this message always prints
-                set_log_level(self.as_conf_object_mut(), LogLevel::Info)?;
-
-                info!(
-                    self.as_conf_object(),
-                    "Configured iteration count {} reached. Stopping after {} seconds ({} exec/s).",
-                    self.iterations,
-                    duration.as_secs_f32(),
-                    self.iterations as f32 / duration.as_secs_f32()
-                );
-
-                self.send_shutdown()?;
-
-                if self.quit_on_iteration_limit {
-                    quit(0)?;
-                } else {
-                    return Ok(());
-                }
-            }
-
-            let fuzzer_tx = self
-                .fuzzer_tx
-                .get()
-                .ok_or_else(|| anyhow!("No fuzzer tx channel"))?;
-
-            match kind {
-                SolutionKind::Timeout => {
-                    self.timeouts += 1;
-                    fuzzer_tx.send(ExitKind::Timeout)?
-                }
+            let (exit_kind, iteration_count) = match kind {
+                SolutionKind::Timeout => (ExitKind::Timeout, IterationCount::Timeout),
                 SolutionKind::Exception | SolutionKind::Breakpoint | SolutionKind::Manual => {
-                    self.solutions += 1;
-                    fuzzer_tx.send(ExitKind::Crash)?
+                    (ExitKind::Crash, IterationCount::Solution)
                 }
+            };
+
+            // Solution/timeout path: classify exit kind and increment corresponding counters.
+            if let IterationControl::StopRequested = self.finish_iteration(
+                exit_kind,
+                iteration_count,
+                "Missing start buffer or size, not writing testcase.",
+            )? {
+                return Ok(());
             }
-
-            self.restore_initial_snapshot()?;
-            self.coverage_prev_loc = 0;
-
-            if self.start_info.get().is_some() {
-                self.get_and_write_testcase()?;
-            } else {
-                debug!(
-                    self.as_conf_object(),
-                    "Missing start buffer or size, not writing testcase."
-                );
-            }
-
-            self.post_timeout_event()?;
         }
 
         if self.save_all_execution_traces {
