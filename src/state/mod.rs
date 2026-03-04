@@ -21,8 +21,8 @@ pub(crate) use policy::SnapshotRestorePolicy;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub(crate) enum SolutionKind {
     Timeout,
-    Exception,
-    Breakpoint,
+    Exception { number: i64 },
+    Breakpoint { number: i64 },
     Manual,
 }
 
