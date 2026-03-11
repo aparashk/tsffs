@@ -93,12 +93,7 @@ impl Tsffs {
         self.execution_trace.0.clear();
         self.save_repro_bookmark_if_needed()?;
 
-        debug!(self.as_conf_object(), "Resuming simulation");
-
-        run_alone(|| {
-            continue_simulation(0)?;
-            Ok(())
-        })?;
+        self.continue_after_repro_prepared()?;
 
         Ok(())
     }
@@ -230,12 +225,7 @@ impl Tsffs {
             self.save_symbolic_coverage()?;
         }
 
-        debug!(self.as_conf_object(), "Resuming simulation");
-
-        run_alone(|| {
-            continue_simulation(0)?;
-            Ok(())
-        })?;
+        self.continue_after_repro_prepared()?;
 
         Ok(())
     }
@@ -300,12 +290,7 @@ impl Tsffs {
         self.execution_trace.0.clear();
         self.save_repro_bookmark_if_needed()?;
 
-        debug!(self.as_conf_object(), "Resuming simulation");
-
-        run_alone(|| {
-            continue_simulation(0)?;
-            Ok(())
-        })?;
+        self.continue_after_repro_prepared()?;
 
         Ok(())
     }

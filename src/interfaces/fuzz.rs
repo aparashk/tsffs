@@ -7,10 +7,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use libafl::inputs::HasBytesVec;
-use simics::{
-    continue_simulation, debug, interface, lookup_file, run_alone, AsConfObject, AttrValue,
-    ConfObject, GenericAddress,
-};
+use simics::{debug, interface, lookup_file, AsConfObject, AttrValue, ConfObject, GenericAddress};
 use std::{
     ffi::{c_char, CStr},
     fs::read,
@@ -49,11 +46,7 @@ impl Tsffs {
             self.restore_initial_snapshot()?;
             self.get_and_write_testcase()?;
             self.post_timeout_event()?;
-
-            run_alone(|| {
-                continue_simulation(0)?;
-                Ok(())
-            })?;
+            self.continue_after_repro_prepared()?;
         }
 
         Ok(())

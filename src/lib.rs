@@ -46,12 +46,13 @@ use num_traits::FromPrimitive as _;
 use os::windows::WindowsOsInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::to_writer;
+use simics::continue_simulation;
 use simics::{
     break_simulation, class, debug, error, free_attribute, get_class, get_interface,
-    get_processor_number, info, lookup_file, object_clock, run_command, run_python, simics_init,
-    sys::save_flags_t, trace, version_base, warn, write_configuration_to_file, AsConfObject,
-    BreakpointId, ClassCreate, ClassObjectsFinalize, ConfObject, CoreBreakpointMemopHap,
-    CoreControlRegisterWriteHap, CoreExceptionHap, CoreMagicInstructionHap,
+    get_processor_number, info, lookup_file, object_clock, run_alone, run_command, run_python,
+    simics_init, sys::save_flags_t, trace, version_base, warn, write_configuration_to_file,
+    AsConfObject, BreakpointId, ClassCreate, ClassObjectsFinalize, ConfObject,
+    CoreBreakpointMemopHap, CoreControlRegisterWriteHap, CoreExceptionHap, CoreMagicInstructionHap,
     CoreSimulationStoppedHap, CpuInstrumentationSubscribeInterface, Event, EventClassFlag,
     FromConfObject, HapHandle, Interface,
 };
@@ -268,6 +269,13 @@ pub(crate) struct Tsffs {
     /// Whether the fuzzer should stop on compiled-in harnesses. If set to `True`, the fuzzer
     /// will start fuzzing when a harness macro is executed.
     pub stop_on_harness: bool,
+    #[class(attribute(optional, default = true))]
+    /// Whether TSFFS should automatically resume simulation after preparing a repro testcase.
+    ///
+    /// When set to `False`, TSFFS will prepare repro execution state (snapshot restore,
+    /// testcase write, timeout event, bookmark) but not call continue. This is useful when
+    /// an external debugger (for example a GDB stub) should control resume.
+    pub repro_auto_continue: bool,
     #[class(attribute(optional, default = 0))]
     /// The index number which is passed to the platform-specific magic instruction HAP
     /// by a compiled-in harness to signal that the fuzzer should start the fuzzing loop.
@@ -856,6 +864,30 @@ impl Tsffs {
         if self.repro_testcase.is_some() && !self.repro_bookmark_set {
             free_attribute(run_command("set-bookmark start")?)?;
             self.repro_bookmark_set = true;
+        }
+
+        Ok(())
+    }
+
+    /// Return true if TSFFS should continue simulation after preparing repro state.
+    pub fn should_auto_continue_repro(&self) -> bool {
+        self.repro_testcase.is_none() || self.repro_auto_continue
+    }
+
+    /// Resume immediately after preparing repro state, or log that external resume is required.
+    pub fn continue_after_repro_prepared(&self) -> Result<()> {
+        if self.should_auto_continue_repro() {
+            debug!(self.as_conf_object(), "Resuming simulation");
+
+            run_alone(|| {
+                continue_simulation(0)?;
+                Ok(())
+            })?;
+        } else {
+            info!(
+                self.as_conf_object(),
+                "Repro testcase prepared; waiting for external resume."
+            );
         }
 
         Ok(())
