@@ -4,6 +4,7 @@
   - [Using Provided Headers](#using-provided-headers)
   - [Multiple Harnesses in One Binary](#multiple-harnesses-in-one-binary)
   - [Alternative Start Harnesses](#alternative-start-harnesses)
+  - [Semi-Persistent and Fully Persistent Execution](#semi-persistent-and-fully-persistent-execution)
   - [Troubleshooting](#troubleshooting)
     - [Compile Errors About Temporaries](#compile-errors-about-temporaries)
 
@@ -147,6 +148,40 @@ different target software to be used with as little modification as possible.
   size as the third argument. Use this harness when the target software does
   not initially have `*size_ptr` set to the maximum size, but still needs to
   read the actual buffer size.
+
+## Semi-Persistent and Fully Persistent Execution
+
+When `snapshot_restore_interval` is set to a value other than `1`, the snapshot is not
+restored at every iteration boundary. Execution continues normally after `HARNESS_STOP`,
+so the harness must use a loop so that control flow reaches the next `HARNESS_STOP`
+without relying on a snapshot restore. `HARNESS_START` only needs to be called once
+(the snapshot is taken on the first call); it does not need to be repeated each
+iteration:
+
+```c
+#include "tsffs.h"
+
+int main() {
+    char buffer[20];
+    size_t size = sizeof(buffer);
+
+    // Snapshot is taken here (once). TSFFS writes the first testcase into buffer
+    // and size.
+    HARNESS_START(buffer, &size);
+
+    while (1) {
+        // TSFFS injects new testcase data into buffer before each iteration.
+        function_under_test(buffer, size);
+
+        HARNESS_STOP();
+    }
+}
+```
+
+For `snapshot_restore_interval = N` (semi-persistent), the snapshot is restored every N
+iterations. For `snapshot_restore_interval = 0` (fully persistent), the snapshot is
+never restored; any per-iteration state (allocated memory, open handles, etc.) must be
+cleaned up manually inside the loop.
 
 ## Troubleshooting
 
